@@ -4,14 +4,16 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AniDBCore.Commands;
 using AniDBCore.Commands.Auth;
+using AniDBCore.Commands.Misc;
+using AniDBCore.Utils;
 
 namespace AniDBCore {
     internal static class Client {
+        public static bool Cache;
         public static bool Connected { get; private set; }
 
         private static readonly Dictionary<string, ICommandResult> CommandsWithResponse =
@@ -23,24 +25,27 @@ namespace AniDBCore {
         private static readonly Queue<Command> CommandQueue = new Queue<Command>();
         private static int _timeOutsSinceLastResponse;
         private static UdpClient _connection;
+        private const int LocalPort = 4257;
         private static string _sessionKey;
         private static bool _rateLimited;
 
         private static object rlLock = new object();
 
         private static void ReceiveData() {
-            IPEndPoint any = new IPEndPoint(IPAddress.Any, 0);
+            IPEndPoint any = new IPEndPoint(IPAddress.Any, LocalPort);
             // Always receive data
             while (Connected) {
                 byte[] rawData = _connection.Receive(ref any);
-                string dataString = Encoding.ASCII.GetString(rawData);
+                string dataString = rawData.DecodeBytesToContent();
                 _rateLimited = false;
+
+                Console.WriteLine("Got data: " + dataString);
 
                 List<string> data = dataString.Split(' ').ToList();
                 Command command = null;
 
                 // Check for tag. If there is no tag present, that means the packet is either a server error, or a notification
-                if (Regex.IsMatch(data[0], "/^_[0-9a-zA-Z]{4}$/i")) {
+                if (StaticUtils.ValidTag(data[0])) {
                     // Find command using tag
                     command = CommandsWaitingForResponse[data[0]];
                     if (command.Tag != data[0])
@@ -53,7 +58,7 @@ namespace AniDBCore {
                 // Check for server error (handles any error in the 6xx range, just in case
                 if (int.TryParse(data[0], out int returnCodeInt) && returnCodeInt >= 600 && returnCodeInt <= 699 &&
                     returnCodeInt != 601 && returnCodeInt != 602) {
-                    // TODO Report to Ommina
+                    // Wiki says to report to Ommina, but he says this probably won't ever happen, so ¯\_(ツ)_/¯
 
                     if (command != null)
                         // From the sounds of it, it's not likely that we have a tag for a 6xx error, but if we do, send it back to the caller
@@ -70,12 +75,15 @@ namespace AniDBCore {
                 }
 
                 // Get the return code
-                if (Enum.TryParse(data[0], out ReturnCode returnCode) == false) {
+                if (Enum.TryParse(data[0], out ReturnCode returnCode)) {
+                    // Remove the return code since we've already parsed it into our enum
+                    data.RemoveAt(0);
+
                     // Handle all cases where we need to handle something in this class, otherwise just return a response to the queue
                     switch (returnCode) {
                         case ReturnCode.LoginAccepted:
                         case ReturnCode.LoginAcceptedNewVersion: {
-                            _sessionKey = data[1];
+                            _sessionKey = data[0];
 
                             CommandsWithResponse.Add(command.Tag, new AuthResult(returnCode));
                             break;
@@ -91,12 +99,13 @@ namespace AniDBCore {
                         }
                         default:
                             ICommandResult result =
-                                Activator.CreateInstance(command.ResultType, returnCode) as ICommandResult;
+                                Activator.CreateInstance(command.ResultType, returnCode, data[0]) as ICommandResult;
                             CommandsWithResponse.Add(command.Tag, result);
                             break;
                     }
                 } else {
                     // Couldn't get the return code? TODO handle
+                    Console.WriteLine("no return code?");
                 }
             }
 
@@ -111,6 +120,7 @@ namespace AniDBCore {
         private static void SendData() {
             // local bool so we don't lock for 2 seconds. If the value changes between the time we lock, and the time we start sleeping, oh well, it won't break anything, just delay it.
             bool wait = false;
+            DateTime lastCommandSentTime = DateTime.MinValue;
             while (Connected) {
                 lock (rlLock)
                     if (_rateLimited)
@@ -121,8 +131,26 @@ namespace AniDBCore {
                     continue;
                 }
 
+                // Check if queue is empty and continue if it is 
+                if (CommandQueue.Count == 0) {
+                    // Check if last command we sent was more than 5 minutes ago so we can keep connection alive (for NAT)
+                    if (lastCommandSentTime < DateTime.Now.AddMinutes(-5) && lastCommandSentTime != DateTime.MinValue) {
+                        // blindly send a ping to keep connection alive. Is this the best? Maybe not, but should work.
+                        PingCommand pingCommand = new PingCommand();
+                        Task<ICommandResult> _ = pingCommand.Send();
+                        //TODO NAT stuff
+                    }
+
+                    Thread.Sleep(150); // small timeout
+                    continue;
+                }
+
                 Command command = CommandQueue.Dequeue();
-                // TODO Send command
+                lastCommandSentTime = DateTime.Now;
+                string commandString = $"{command.CommandBase} {command.GetParameters()}";
+                Console.WriteLine("Sending data: " + commandString);
+                byte[] bytes = Encoding.ASCII.GetBytes(commandString.Trim());
+                _connection.Send(bytes, bytes.Length);
                 CommandsWaitingForResponse.Add(command.Tag, command);
 
                 // Sleep for 2.1 seconds just to make sure API don't get mad (limit is 1 per 2 seconds)
@@ -160,7 +188,8 @@ namespace AniDBCore {
             if (Connected)
                 return;
 
-            _connection = new UdpClient(host, port);
+            _connection = new UdpClient(new IPEndPoint(IPAddress.Any, LocalPort));
+            _connection.Connect(host, port);
             Connected = true;
             Task.Run(ReceiveData);
             Task.Run(SendData);
@@ -180,7 +209,10 @@ namespace AniDBCore {
                 throw new Exception("Connection must be initialized before queueing commands!");
 
             CommandQueue.Enqueue(command);
-            return Task.Run(() => WaitForResponse(command.Tag));
+            return Task.Run(() => {
+                StaticUtils.ReleaseTag(command.Tag);
+                return WaitForResponse(command.Tag);
+            });
         }
     }
 }

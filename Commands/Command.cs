@@ -2,18 +2,23 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AniDBCore.Utils;
 
 namespace AniDBCore.Commands {
     public abstract class Command : ICommand {
         // Properties
         protected readonly Dictionary<string, string> Parameters = new Dictionary<string, string>();
-        public readonly string Tag = Guid.NewGuid().ToString();
+        public readonly string Tag = StaticUtils.GenerateTag();
         public readonly Type ResultType;
+        public readonly string CommandBase;
 
-        protected Command(Type resultType) {
-            ResultType = resultType != typeof(CommandResult)
+        protected Command(string commandBase, Type resultType) {
+            ResultType = resultType.IsSubclassOf(typeof(CommandResult)) == false
                 ? throw new Exception("ResultType must inherit from CommandResult")
                 : resultType;
+
+            CommandBase = commandBase;
+            Parameters.Add("tag", Tag);
         }
 
         // Methods
@@ -21,10 +26,21 @@ namespace AniDBCore.Commands {
         /// Gets a list of the parameters to be sent to the API with this command
         /// </summary>
         /// <returns></returns>
-        internal IEnumerable<KeyValuePair<string, string>> GetParameters() {
-            return Parameters.ToList();
+        internal string GetParameters() {
+            string parameters = string.Empty;
+
+            for (int i = 0; i < Parameters.Count; i++) {
+                KeyValuePair<string, string> pair = Parameters.ElementAt(i);
+
+                if (i + 1 != Parameters.Count)
+                    parameters += $"{pair.Key.EncodeContent()}={pair.Value.EncodeContent()}&";
+                else
+                    parameters += $"{pair.Key.EncodeContent()}={pair.Value.EncodeContent()}";
+            }
+
+            return parameters;
         }
-       
+
         public abstract Task<ICommandResult> Send();
 
         /// <summary>

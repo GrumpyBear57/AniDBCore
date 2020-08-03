@@ -1,11 +1,22 @@
-﻿using System.Threading.Tasks;
+﻿using System;
+using System.Threading.Tasks;
 using AniDBCore.Commands;
 using AniDBCore.Commands.Auth;
+using AniDBCore.Commands.Misc;
 
 namespace AniDBCore {
     public class AniDB {
-        public AniDB(string host, int port) {
+        public const string ClientName = "AniDBCore";
+        public const string ClientVersion = "1";
+
+        public AniDB(string host, int port, bool cache = true) {
             Client.Connect(host, port);
+            Client.Cache = cache;
+
+            Task<ICommandResult> result = SendCommand(new PingCommand());
+            result.Wait(2500);
+            if (result.Result.ReturnCode == ReturnCode.RequestTimedOut)
+                throw new Exception("Failed to connect");
         }
 
         public void Disconnect() {
