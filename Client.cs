@@ -15,6 +15,7 @@ namespace AniDBCore {
     internal static class Client {
         public static bool Cache;
         public static bool Connected { get; private set; }
+        public static bool Encryption { get; private set; }
 
         private static readonly Dictionary<string, ICommandResult> CommandsWithResponse =
             new Dictionary<string, ICommandResult>();
@@ -26,8 +27,10 @@ namespace AniDBCore {
         private static int _timeOutsSinceLastResponse;
         private static UdpClient _connection;
         private const int LocalPort = 4257;
+        private static string _encryptionKey;
         private static string _sessionKey;
         private static bool _rateLimited;
+        private static string _apiKey;
 
         private static object rlLock = new object();
 
@@ -85,7 +88,13 @@ namespace AniDBCore {
                         case ReturnCode.LoginAcceptedNewVersion: {
                             _sessionKey = data[0];
 
-                            CommandsWithResponse.Add(command.Tag, new AuthResult(returnCode));
+                            CommandsWithResponse.Add(command.Tag, new AuthResult(returnCode, data[0]));
+                            break;
+                        }
+                        case ReturnCode.EncryptionEnabled: {
+                            Encryption = true;
+                            string salt = data[0];
+                            _encryptionKey = StaticUtils.MD5Hash(_apiKey + salt);
                             break;
                         }
                         case ReturnCode.ServerBusy:
@@ -154,9 +163,9 @@ namespace AniDBCore {
                 string commandString = $"{command.CommandBase} {command.GetParameters()}";
                 if (command.RequiresSession)
                     commandString += $"&{_sessionKey}";
-                
+
                 Console.WriteLine("Sending data: " + commandString);
-                
+
                 byte[] bytes = Encoding.ASCII.GetBytes(commandString.Trim());
                 _connection.Send(bytes, bytes.Length);
                 CommandsWaitingForResponse.Add(command.Tag, command);
@@ -192,15 +201,17 @@ namespace AniDBCore {
             return CommandsWithResponse[tag];
         }
 
-        public static void Connect(string host, int port) {
+        public static bool Connect(string host, int port) {
             if (Connected)
-                return;
+                return false;
 
             _connection = new UdpClient(new IPEndPoint(IPAddress.Any, LocalPort));
             _connection.Connect(host, port);
             Connected = true;
             Task.Run(ReceiveData);
             Task.Run(SendData);
+
+            return true;
         }
 
         public static void Disconnect() {
@@ -221,6 +232,15 @@ namespace AniDBCore {
                 StaticUtils.ReleaseTag(command.Tag);
                 return WaitForResponse(command.Tag);
             });
+        }
+
+        public static void SetApiKey(string apiKey) {
+            // TODO make sure this is valid API key format
+            
+            if (string.IsNullOrEmpty(_apiKey) == false)
+                throw new Exception("API Key cannot be set more than once");
+
+            _apiKey = apiKey;
         }
     }
 }

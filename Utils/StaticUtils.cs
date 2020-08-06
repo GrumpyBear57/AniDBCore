@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -103,6 +104,22 @@ namespace AniDBCore.Utils {
             }
 
             return true;
+        }
+
+        public static string MD5Hash(string value) {
+            using MD5 md5 = MD5.Create();
+
+            byte[] bytes = Encoding.ASCII.GetBytes(value);
+            byte[] hash = md5.ComputeHash(bytes);
+
+            // TODO Find out if this is supposed to be converted straight back to ASCII, or if it's hex
+            // For now, hex
+            StringBuilder output = new StringBuilder(hash.Length * 2);
+            foreach (byte b in bytes) {
+                output.Append(b.ToString("X2"));
+            }
+
+            return output.ToString();
         }
     }
 }

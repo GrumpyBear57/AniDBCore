@@ -5,12 +5,15 @@ using AniDBCore.Commands.Auth;
 using AniDBCore.Commands.Misc;
 
 namespace AniDBCore {
-    public class AniDB {
+    public static class AniDB {
         public const string ClientName = "AniDBCore";
         public const string ClientVersion = "1";
 
-        public AniDB(string host, int port, bool cache = true) {
-            Client.Connect(host, port);
+        public static bool Connect(string host, int port, bool cache = true) {
+            bool clientConnected = Client.Connect(host, port);
+            if (clientConnected == false)
+                return false;
+            
             Client.Cache = cache;
 
             PingCommand command = new PingCommand();
@@ -19,20 +22,31 @@ namespace AniDBCore {
                 throw new Exception($"Failed to set parameter ({error})");
             Task<ICommandResult> result = command.Send();
             result.Wait(2500);
-            if (result.Result.ReturnCode == ReturnCode.RequestTimedOut)
-                throw new Exception("Failed to connect");
+            return result.Result.ReturnCode == ReturnCode.Pong;
         }
 
-        public void Disconnect() {
+        public static void Disconnect() {
             Client.Disconnect();
         }
 
-        public async Task<ICommandResult> SendCommand(ICommand command) {
+        public static async Task<ICommandResult> SendCommand(ICommand command) {
             return await command.Send();
         }
 
-        public async Task<ICommandResult> Auth(string username, string password) {
+        public static async Task<ICommandResult> Auth(string username, string password, bool encryption = false,
+                                                      string apiKey = "") {
+            if (encryption) {
+                Client.SetApiKey(apiKey);
+                ICommandResult result = await SendCommand(new EncryptCommand(username));
+                if (result.ReturnCode != ReturnCode.EncryptionEnabled)
+                    return result;
+            }
+
             return await SendCommand(new AuthCommand(username, password));
+        }
+
+        public static async Task<ICommandResult> Logout() {
+            return await SendCommand(new LogoutCommand());
         }
     }
 }
