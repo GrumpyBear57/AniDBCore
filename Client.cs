@@ -139,7 +139,7 @@ namespace AniDBCore {
                         // blindly send a ping to keep connection alive. Is this the best? Maybe not, but should work.
                         PingCommand pingCommand = new PingCommand();
                         bool parameterSet = pingCommand.SetOptionalParameter("nat", "1", out string error);
-                        if (parameterSet)
+                        if (parameterSet == false)
                             throw new Exception($"setting parameter failed ({error})");
                         Task<ICommandResult> _ = pingCommand.Send();
                         //TODO NAT stuff
