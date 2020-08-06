@@ -7,18 +7,23 @@ using AniDBCore.Utils;
 namespace AniDBCore.Commands {
     public abstract class Command : ICommand {
         // Properties
+        public readonly IReadOnlyDictionary<string, DataType> OptionalParameters;
         protected readonly Dictionary<string, string> Parameters = new Dictionary<string, string>();
         public readonly string Tag = StaticUtils.GenerateTag();
-        public readonly Type ResultType;
+        public readonly bool RequiresSession;
         public readonly string CommandBase;
+        public readonly Type ResultType;
 
-        protected Command(string commandBase, Type resultType) {
+        protected Command(string commandBase, bool requiresSession, Type resultType,
+                          IReadOnlyDictionary<string, DataType> optionalParameters) {
             ResultType = resultType.IsSubclassOf(typeof(CommandResult)) == false
                 ? throw new Exception("ResultType must inherit from CommandResult")
                 : resultType;
 
             CommandBase = commandBase;
+            RequiresSession = requiresSession;
             Parameters.Add("tag", Tag);
+            OptionalParameters = optionalParameters;
         }
 
         // Methods
@@ -44,12 +49,17 @@ namespace AniDBCore.Commands {
         public abstract Task<ICommandResult> Send();
 
         /// <summary>
-        /// Sets a parameter to be sent to the API with this command
+        /// Sets an optional parameter to be sent to the API with this command
         /// </summary>
         /// <param name="name">Name of the parameter to set</param>
         /// <param name="value">Value to set the parameter to</param>
+        /// <param name="error">Error explaining why the operation failed</param>
         /// <returns>If the parameter value was set</returns>
-        public bool SetParameter(string name, string value) {
+        public bool SetOptionalParameter(string name, string value, out string error) {
+            error = string.Empty;
+            if (StaticUtils.IsParameterValid(name, value, OptionalParameters, ref error) == false)
+                return false;
+            
             try {
                 Parameters.Add(name, value);
                 return true;

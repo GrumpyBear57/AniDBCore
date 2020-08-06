@@ -13,7 +13,11 @@ namespace AniDBCore {
             Client.Connect(host, port);
             Client.Cache = cache;
 
-            Task<ICommandResult> result = SendCommand(new PingCommand());
+            PingCommand command = new PingCommand();
+            bool setParameter = command.SetOptionalParameter("nat", "1", out string error);
+            if (setParameter == false)
+                throw new Exception($"Failed to set parameter ({error})");
+            Task<ICommandResult> result = command.Send();
             result.Wait(2500);
             if (result.Result.ReturnCode == ReturnCode.RequestTimedOut)
                 throw new Exception("Failed to connect");

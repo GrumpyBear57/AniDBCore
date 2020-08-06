@@ -39,7 +39,7 @@ namespace AniDBCore {
                 string dataString = rawData.DecodeBytesToContent();
                 _rateLimited = false;
 
-                Console.WriteLine("Got data: " + dataString);
+                Console.WriteLine($"{DateTime.Now:hh:mm:ss} - Got data: {dataString}");
 
                 List<string> data = dataString.Split(' ').ToList();
                 Command command = null;
@@ -127,6 +127,7 @@ namespace AniDBCore {
                         wait = true;
 
                 if (wait) {
+                    // TODO exponential backoff
                     Thread.Sleep(2000); // sleep and hope we aren't rate limited after we're done
                     continue;
                 }
@@ -137,6 +138,9 @@ namespace AniDBCore {
                     if (lastCommandSentTime < DateTime.Now.AddMinutes(-5) && lastCommandSentTime != DateTime.MinValue) {
                         // blindly send a ping to keep connection alive. Is this the best? Maybe not, but should work.
                         PingCommand pingCommand = new PingCommand();
+                        bool parameterSet = pingCommand.SetOptionalParameter("nat", "1", out string error);
+                        if (parameterSet)
+                            throw new Exception($"setting parameter failed ({error})");
                         Task<ICommandResult> _ = pingCommand.Send();
                         //TODO NAT stuff
                     }
@@ -148,7 +152,11 @@ namespace AniDBCore {
                 Command command = CommandQueue.Dequeue();
                 lastCommandSentTime = DateTime.Now;
                 string commandString = $"{command.CommandBase} {command.GetParameters()}";
+                if (command.RequiresSession)
+                    commandString += $"&{_sessionKey}";
+                
                 Console.WriteLine("Sending data: " + commandString);
+                
                 byte[] bytes = Encoding.ASCII.GetBytes(commandString.Trim());
                 _connection.Send(bytes, bytes.Length);
                 CommandsWaitingForResponse.Add(command.Tag, command);

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -57,6 +58,51 @@ namespace AniDBCore.Utils {
             if (TagsInUse.TryRemove(tag, out bool _) == false)
                 // Maybe I can loop this until it succeeds instead of bailing. Meh
                 throw new Exception("Failed to release Tag!");
+        }
+
+        public static bool IsParameterValid(string name, string value,
+                                            IReadOnlyDictionary<string, DataType> parameterDefinitions,
+                                            ref string error) {
+            if (parameterDefinitions.ContainsKey(name) == false) {
+                error = $"Invalid parameter name: {name}";
+                return false;
+            }
+
+            switch (parameterDefinitions[name]) {
+                case DataType.Boolean:
+                    if (value != "0" && value != "1") {
+                        error = $"Parameter '{name}' expects a boolean (0 or 1) value, got '{value}'";
+                        return false;
+                    }
+
+                    break;
+                case DataType.String:
+                    // TODO Limit to 1400 bytes? Might depend on MTU? 
+                    break;
+                case DataType.Int2:
+                    if (short.TryParse(value, out short _) == false) {
+                        error = $"Parameter '{name}' expects a 2-byte Integer, got '{value}'";
+                        return false;
+                    }
+
+                    break;
+                case DataType.Int4:
+                    if (int.TryParse(value, out int _) == false) {
+                        error = $"Parameter '{name}' expects a 4-byte Integer, got '{value}'";
+                        return false;
+                    }
+
+                    break;
+                case DataType.HexString:
+                    // TODO (from wiki) -- A hex representation of a decimal value, two characters per byte.
+                    //                     If multiple bytes are represented, byte one is the first two characters
+                    //                     of the string, byte two the next two, and so on. 
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            return true;
         }
     }
 }
