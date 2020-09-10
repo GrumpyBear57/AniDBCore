@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Threading.Tasks;
 using AniDBCore.Utils;
 
 namespace AniDBCore.Commands.Auth {
@@ -26,10 +25,6 @@ namespace AniDBCore.Commands.Auth {
             Parameters.Add("protover", "3");
             Parameters.Add("client", AniDB.ClientName);
             Parameters.Add("clientver", AniDB.ClientVersion);
-        }
-
-        public override async Task<ICommandResult> Send() {
-            return await Client.QueueCommand(this);
         }
     }
 }

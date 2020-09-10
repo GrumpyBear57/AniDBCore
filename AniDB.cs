@@ -3,17 +3,25 @@ using System.Threading.Tasks;
 using AniDBCore.Commands;
 using AniDBCore.Commands.Auth;
 using AniDBCore.Commands.Misc;
+using AniDBCore.Events;
 
 namespace AniDBCore {
     public static class AniDB {
         public const string ClientName = "AniDBCore";
         public const string ClientVersion = "1";
 
+        public static event EventHandler<ClientErrorArgs> ClientError;
+        public static event EventHandler<ServerErrorArgs> ServerError;
+        public static event EventHandler<CommandSentArgs> CommandSent;
+        public static event EventHandler<CommandResultReceivedArgs> CommandResultReceived;
+        public static event EventHandler KeepAlivePing;
+        public static event EventHandler KeepAlivePong;
+
         public static bool Connect(string host, int port, bool cache = true) {
             bool clientConnected = Client.Connect(host, port);
             if (clientConnected == false)
                 return false;
-            
+
             Client.Cache = cache;
 
             PingCommand command = new PingCommand();
@@ -47,6 +55,32 @@ namespace AniDBCore {
 
         public static async Task<ICommandResult> Logout() {
             return await SendCommand(new LogoutCommand());
+        }
+
+        // Dunno if sender should really be null for the event invocations, but I can't use this 'cause static class, so....
+
+        internal static void InvokeClientError(ClientErrorArgs args) {
+            ClientError?.Invoke(null, args);
+        }
+
+        internal static void InvokeServerError(ServerErrorArgs args) {
+            ServerError?.Invoke(null, args);
+        }
+
+        internal static void InvokeCommandSent(CommandSentArgs args) {
+            CommandSent?.Invoke(null, args);
+        }
+
+        internal static void InvokeCommandResultReceived(CommandResultReceivedArgs args) {
+            CommandResultReceived?.Invoke(null, args);
+        }
+
+        internal static void InvokeKeepAlivePing() {
+            KeepAlivePing?.Invoke(null, EventArgs.Empty);
+        }
+
+        internal static void InvokeKeepAlivePong() {
+            KeepAlivePong?.Invoke(null, EventArgs.Empty);
         }
     }
 }

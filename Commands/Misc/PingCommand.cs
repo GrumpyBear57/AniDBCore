@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Threading.Tasks;
 using AniDBCore.Utils;
 
 namespace AniDBCore.Commands.Misc {
@@ -12,10 +11,6 @@ namespace AniDBCore.Commands.Misc {
             };
 
         public PingCommand() : base("PING", false, typeof(PingResult), OptionalParams) {
-        }
-
-        public override async Task<ICommandResult> Send() {
-            return await Client.QueueCommand(this);
         }
     }
 }

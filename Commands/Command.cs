@@ -2,17 +2,20 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AniDBCore.Events;
 using AniDBCore.Utils;
 
 namespace AniDBCore.Commands {
     public abstract class Command : ICommand {
         // Properties
         public readonly IReadOnlyDictionary<string, DataType> OptionalParameters;
-        protected readonly Dictionary<string, string> Parameters = new Dictionary<string, string>();
-        public readonly string Tag = StaticUtils.GenerateTag();
+        public readonly CommandTag Tag = new CommandTag();
         public readonly bool RequiresSession;
         public readonly string CommandBase;
         public readonly Type ResultType;
+
+        protected readonly Dictionary<string, string> Parameters = new Dictionary<string, string>();
+        protected bool Sent;
 
         protected Command(string commandBase, bool requiresSession, Type resultType,
                           IReadOnlyDictionary<string, DataType> optionalParameters) {
@@ -22,7 +25,7 @@ namespace AniDBCore.Commands {
 
             CommandBase = commandBase;
             RequiresSession = requiresSession;
-            Parameters.Add("tag", Tag);
+            Parameters.Add("tag", Tag.ToString());
             OptionalParameters = optionalParameters;
         }
 
@@ -46,7 +49,14 @@ namespace AniDBCore.Commands {
             return parameters;
         }
 
-        public abstract Task<ICommandResult> Send();
+        public virtual async Task<ICommandResult> Send() {
+            //TODO add a Duplicate() method (or something similar)
+            if (Sent)
+                AniDB.InvokeClientError(new ClientErrorArgs("Cannot send a command that has already been sent!"));
+
+            Sent = true;
+            return await Client.QueueCommand(this);
+        }
 
         /// <summary>
         /// Sets an optional parameter to be sent to the API with this command
@@ -59,7 +69,7 @@ namespace AniDBCore.Commands {
             error = string.Empty;
             if (StaticUtils.IsParameterValid(name, value, OptionalParameters, ref error) == false)
                 return false;
-            
+
             try {
                 Parameters.Add(name, value);
                 return true;
