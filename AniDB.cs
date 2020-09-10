@@ -4,6 +4,7 @@ using AniDBCore.Commands;
 using AniDBCore.Commands.Auth;
 using AniDBCore.Commands.Misc;
 using AniDBCore.Events;
+using AniDBCore.Utils;
 
 namespace AniDBCore {
     public static class AniDB {
@@ -44,7 +45,7 @@ namespace AniDBCore {
         public static async Task<ICommandResult> Auth(string username, string password, bool encryption = false,
                                                       string apiKey = "") {
             if (encryption) {
-                Client.SetApiKey(apiKey);
+                Session.SetApiKey(apiKey);
                 ICommandResult result = await SendCommand(new EncryptCommand(username));
                 if (result.ReturnCode != ReturnCode.EncryptionEnabled)
                     return result;

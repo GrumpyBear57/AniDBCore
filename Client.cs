@@ -13,9 +13,10 @@ using AniDBCore.Utils;
 
 namespace AniDBCore {
     internal static class Client {
+        private const int LocalPort = 4257;
+
         public static bool Cache;
         public static bool Connected { get; private set; }
-        public static bool Encryption { get; private set; }
 
         private static readonly Dictionary<CommandTag, ICommandResult> CommandsWithResponse =
             new Dictionary<CommandTag, ICommandResult>();
@@ -24,14 +25,12 @@ namespace AniDBCore {
             new Dictionary<CommandTag, Command>();
 
         private static readonly Queue<Command> CommandQueue = new Queue<Command>();
+        private static readonly Session Session;
+
         private static int _timeOutsSinceLastResponse;
-        private static UdpClient _connection;
-        private const int LocalPort = 4257;
-        private static string _encryptionKey;
-        private static string _sessionKey;
-        private static bool _rateLimited;
-        private static string _apiKey;
         private static CommandTag _keepAliveTag;
+        private static UdpClient _connection;
+        private static bool _rateLimited;
 
         private static object rlLock = new object();
 
@@ -44,7 +43,12 @@ namespace AniDBCore {
                 // then handle it appropriately
 
                 APIResponse response = WaitForResponse(ref any);
-                HandleResponse(response);
+                Command command = ParseResponse(response);
+                if (command == null)
+                    continue;
+                ICommandResult result = PreReturnResult(response, command);
+
+                CommandsWithResponse.Add(command.Tag, result);
             }
 
             // Clean up any loose commands that never got a reply
@@ -67,11 +71,11 @@ namespace AniDBCore {
             return new APIResponse(dataString);
         }
 
-        private static void HandleResponse(APIResponse response) {
+        private static Command ParseResponse(APIResponse response) {
             // Make sure there was a tag on the response
             if (response.Tag == null) {
                 Console.WriteLine($"No tag ({response})");
-                return;
+                return null;
             }
 
             // Find command using tag
@@ -81,48 +85,48 @@ namespace AniDBCore {
             if (response.Tag == _keepAliveTag) {
                 // TODO do NAT stuff here instead of where we sent this ping, since we have the port the API sees
                 AniDB.InvokeKeepAlivePong();
-                return;
+                return null;
             }
+
+            if (command != null)
+                return command;
 
             // We should always have a command here, since we set a tag on every command we send
-            if (command == null) {
-                AniDB.InvokeClientError(
-                    new ClientErrorArgs($"Command is null; tag is probably not set on reply\nData: {response}")
-                );
+            // Raise an error saying we're missing a command
+            AniDB.InvokeClientError(
+                new ClientErrorArgs($"Command is null; tag is probably not set on reply\nData: {response}")
+            );
 
-                return;
-            }
+            return null;
+        }
 
+        private static ICommandResult PreReturnResult(APIResponse response, Command command) {
             // Handle all cases where we need to handle something in this class, otherwise just return a response to the queue
             switch (response.ReturnCode) {
                 case ReturnCode.LoginAccepted:
                 case ReturnCode.LoginAcceptedNewVersion: {
-                    _sessionKey = response.Data[0];
+                    Session.StartSession(response.Data[0]);
 
-                    CommandsWithResponse.Add(command.Tag, new AuthResult(response.ReturnCode, response.Data[0]));
-                    break;
+                    return new AuthResult(response.ReturnCode);
                 }
                 case ReturnCode.EncryptionEnabled: {
-                    Encryption = true;
                     string salt = response.Data[0];
-                    _encryptionKey = StaticUtils.MD5Hash(_apiKey + salt);
-                    break;
+                    Session.EnableEncryption(StaticUtils.MD5Hash(Session.ApiKey + salt));
+                    
+                    return new EncryptResult(response.ReturnCode);
                 }
                 case ReturnCode.ServerBusy:
                 case ReturnCode.OutOfService: {
                     // TODO make WriterLoop() wait until API is back (should we delay different amounts of time for Busy vs Out of Service?)
-                    break;
+                    return new CommandResult(response.ReturnCode);
                 }
                 case ReturnCode.Timeout: {
                     // TODO add the command back to the queue to be sent again
-                    break;
+                    return new CommandResult(response.ReturnCode);
                 }
                 default:
-                    ICommandResult result =
-                        Activator.CreateInstance(command.ResultType, response.ReturnCode, response.Data[0]) as
-                            ICommandResult;
-                    CommandsWithResponse.Add(command.Tag, result);
-                    break;
+                    return Activator.CreateInstance(command.ResultType, response.ReturnCode, response.Data[0]) as
+                        ICommandResult;
             }
         }
 
@@ -201,9 +205,12 @@ namespace AniDBCore {
         }
 
         private static void SendCommand(Command command) {
+            if (ShouldSendCommand(command) == false)
+                return;
+
             string commandString = $"{command.CommandBase} {command.GetParameters()}".Trim();
             if (command.RequiresSession)
-                commandString += $"&{_sessionKey}";
+                commandString += $"&{Session.SessionKey}";
 
             // TEMP
             Console.WriteLine("Sending data: " + commandString);
@@ -213,6 +220,30 @@ namespace AniDBCore {
             byte[] bytes = Encoding.ASCII.GetBytes(commandString);
             _connection.Send(bytes, bytes.Length);
             CommandsWaitingForResponse.Add(command.Tag, command);
+        }
+
+        private static bool ShouldSendCommand(Command command) {
+            // Don't login again
+            if (Session.LoggedIn && command.CommandBase == "AUTH")
+                return false;
+
+            // Don't encrypt again
+            if (Session.EncryptionEnabled && command.CommandBase == "ENCRYPT")
+                return false;
+
+            // Don't set connection to be encrypted when api key is not set
+            if (string.IsNullOrEmpty(Session.ApiKey) && command.CommandBase == "ENCRYPT")
+                return false;
+
+            // Don't encrypt if a session is already in progress (maybe close the current session and start a new one?)
+            if (Session.LoggedIn && command.CommandBase == "ENCRYPT")
+                return false;
+
+            // Don't logout if not logged in
+            if (Session.LoggedIn == false && command.CommandBase == "LOGOUT")
+                return false;
+
+            return true;
         }
 
         public static bool Connect(string host, int port) {
@@ -232,6 +263,10 @@ namespace AniDBCore {
             if (Connected == false)
                 return;
 
+            // Logout first
+            SendCommand(new LogoutCommand());
+            Session.EndSession();
+
             _connection.Close();
             Connected = false;
             // Tasks should clean themselves up since we're only doing while Connected
@@ -245,15 +280,6 @@ namespace AniDBCore {
 
             CommandQueue.Enqueue(command);
             return Task.Run(() => WaitForResponse(command.Tag));
-        }
-
-        public static void SetApiKey(string apiKey) {
-            // TODO make sure this is valid API key format
-
-            if (string.IsNullOrEmpty(_apiKey) == false)
-                throw new Exception("API Key cannot be set more than once");
-
-            _apiKey = apiKey;
         }
     }
 }

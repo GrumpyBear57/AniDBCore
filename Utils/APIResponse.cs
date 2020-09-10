@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using AniDBCore.Commands;
 using AniDBCore.Events;
 
-namespace AniDBCore.Commands {
+namespace AniDBCore.Utils {
     internal readonly struct APIResponse {
         public readonly CommandTag Tag;
         public readonly ReturnCode ReturnCode;
